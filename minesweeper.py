@@ -157,6 +157,8 @@ class minesweeper():
     def actOnNeighbors(self, x, y):
         unflippedNeighborCount = 0
 	flagCount = 0
+	allFlagCount = 0
+	newFlagCount = 0
 	neighbors = []
 
         for a in range(-1, 2):
@@ -169,12 +171,18 @@ class minesweeper():
 		        flagCount += 1
 		    neighbors.append((x+a, y+b))
 
+	for i in range(self.height):
+	    for j in range(self.width):
+	        if not self.flipped[i][j] and self.beliefs[i][j] == 0:
+		    allFlagCount += 1
+
         for a in range(-1, 2):
 	    for b in range(-1, 2):
 	        if x+a < 0 or x+a >= self.height or y+b < 0 or y+b >= self.width:
 		    continue
 		if not self.flipped[x+a][y+b] and unflippedNeighborCount != flagCount:
 		    self.beliefs[x+a][y+b] *= 1.0 - ((self.grid[x][y] - flagCount) / (float(unflippedNeighborCount) - flagCount))
+		    print self.grid[x][y], (x+a, y+b), flagCount
 		    if not self.flags[x+a][y+b] and self.beliefs[x+a][y+b] > 0:
 		        self.antibeliefs[x+a][y+b] *= ((self.grid[x][y] - flagCount) / (float(unflippedNeighborCount) - flagCount))
 
@@ -186,21 +194,29 @@ class minesweeper():
 		    if not self.flags[i][j] and self.beliefs[i][j] > 0:
 		        self.antibeliefs[i][j] *= (float(self.numMines - self.grid[x][y]) / (unflippedTiles - unflippedNeighborCount))
 
+	for i in range(self.height):
+	    for j in range(self.width):
+	        if not self.flipped[i][j] and self.beliefs[i][j] == 0:
+		    newFlagCount += 1
+		    self.flags[i][j] = True
+
+	return newFlagCount > allFlagCount
+
     def updateBeliefs(self):
 	self.beliefs = [[1 - float(self.numMines)/(self.width*self.height) for i in range(self.width)] for j in range(self.height)]
 	self.antibeliefs = [[float(self.numMines)/(self.width*self.height) for i in range(self.width)] for j in range(self.height)]
-        for i in range(self.height):
-	    for j in range(self.width):
-	        if self.flipped[i][j]:
-		    self.beliefs[i][j] = 0
-		    self.antibeliefs[i][j] = 1
-		    if self.grid[i][j] > 0:
-		        self.actOnNeighbors(i, j)
-
-	for i in range(self.height):
-	    for j in range(self.width):
-	        if self.beliefs[i][j] == 0:
-		    self.flags[i][j] = True
+	newFlags = True
+	while newFlags:
+	    newFlags = False
+            for i in range(self.height):
+   	        for j in range(self.width):
+	            if self.flipped[i][j]:
+		        self.beliefs[i][j] = 0
+		        self.antibeliefs[i][j] = 1
+		        if self.grid[i][j] > 0:
+		            newFlags = newFlags or self.actOnNeighbors(i, j)
+			    if newFlags:
+			        print newFlags
 
     def normalizeBeliefs(self):
         sumBeliefs = 0
@@ -253,7 +269,7 @@ class minesweeper():
         return sumBeliefs == 0 or self.loss()
 
 def main():  
-    ms = minesweeper(22, 22, 100)
+    ms = minesweeper(8, 8, 10)
     gui = minesweeperGui(800, 800, ms)
     while True:
     #ms.grid = [[-2, 0, -2], [1, 2, 1], [0,0,0]]
@@ -267,6 +283,7 @@ def main():
 	        break
             ms.updateBeliefs()
 	    ms.normalizeBeliefs()
+	    time.sleep(3)
 
         gui.draw(ms)
 
@@ -277,7 +294,7 @@ def main():
 
 	raw_input("Press enter to continue")
 
-        ms = minesweeper(22, 22, 100)
+        ms = minesweeper(8, 8, 10)
 
 if __name__ == "__main__": main()
     
