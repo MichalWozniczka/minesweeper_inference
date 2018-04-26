@@ -4,6 +4,15 @@ from PIL import Image
 import random
 import Queue
 import time
+import copy
+import collections
+import operator
+
+def ncr(n, r):
+    r = min(r, n-r)
+    numer = reduce(operator.mul, xrange(n, n-r, -1), 1)
+    denom = reduce(operator.mul, xrange(1, r+1), 1)
+    return numer//denom
 
 class minesweeperGui():
     def __init__(self, w, h, ms):
@@ -54,14 +63,14 @@ class minesweeperGui():
 	        elif ms.flipped[i][j]:
 		    if ms.grid[i][j] == -2:
      		        self.canvas.create_image(j*self.tileSize+self.offsx, i*self.tileSize+self.offsy, image=self.explodedMine)
-		    elif ms.grid[i][j] == -1:
+		    elif ms.grid[i][j] == -1 and False:
      		        self.canvas.create_image(j*self.tileSize+self.offsx, i*self.tileSize+self.offsy, image=self.flag)
 	            else:
      		        self.canvas.create_image(j*self.tileSize+self.offsx, i*self.tileSize+self.offsy, image=self.opened[ms.grid[i][j]])
-		elif ms.beliefs[i][j] == 0:
+		elif ms.beliefs[i][j] == 0 and False:
   		    self.canvas.create_image(j*self.tileSize+self.offsx, i*self.tileSize+self.offsy, image=self.flag)
 		elif displayBeliefs:
-  		    self.canvas.create_image(j*self.tileSize+self.offsx, i*self.tileSize+self.offsy, image=self.beliefs[int((ms.antibeliefs[i][j])*19)])
+  		    self.canvas.create_image(j*self.tileSize+self.offsx, i*self.tileSize+self.offsy, image=self.beliefs[int((ms.beliefs[i][j])*19)])
 		else:
     		    self.canvas.create_image(j*self.tileSize+self.offsx, i*self.tileSize+self.offsy, image=self.unopened)
 
@@ -96,7 +105,59 @@ class minesweeperGui():
 	self.canvas.create_image(self.offsx+10, 25, image=self.numbers[ms.numMines/100])
 	self.canvas.create_image(self.offsx+30, 25, image=self.numbers[(ms.numMines - (ms.numMines/100)*100)/10])
 	self.canvas.create_image(self.offsx+50, 25, image=self.numbers[ms.numMines - (ms.numMines/10)*10])
-		    
+
+class Sampler():
+    def __init__(self, grid, flipped, numMines):
+        self.grid = copy.deepcopy(grid)
+	self.width = len(grid[0])
+	self.height = len(grid)
+	self.flipped = copy.deepcopy(flipped)
+	self.valid = True
+	self.mines = [[False for i in range(self.width)] for j in range(self.height)]
+
+	for i in range(numMines-1):
+	    pos = (random.randrange(self.height), random.randrange(self.width))
+	    while self.mines[pos[0]][pos[1]] == True:
+	        pos = (random.randrange(self.height), random.randrange(self.width))
+	    self.mines[pos[0]][pos[1]] = True
+
+	self.sparePos = (random.randrange(self.height), random.randrange(self.width))
+	while self.mines[self.sparePos[0]][self.sparePos[1]] == True:
+	    self.sparePos = (random.randrange(self.height), random.randrange(self.width))
+	
+	for i in range(self.height):
+	    for j in range(self.width):
+	        if self.mines[i][j]:
+	            if self.flipped[i][j]:
+			self.valid = False
+			continue
+	            for a in range(-1, 2):
+	                for b in range(-1, 2):
+		            if i+a < 0 or i+a >= self.height or j+b < 0 or j+b >= self.width:
+		                continue
+                            if self.flipped[i+a][j+b]:
+		                self.grid[i+a][j+b] -= 1
+
+        for i in range(self.height):
+	    for j in range(self.width):
+	        if self.flipped[i][j] and self.grid[i][j] != 0:
+		    self.valid = False
+
+    def sample(self, pos):
+        if self.valid:
+	    if self.mines[pos[0]][pos[1]]:
+	        pos = self.sparePos
+ 
+            i, j = pos
+            for a in range(-1, 2):
+	        for b in range(-1, 2):
+		    if i+a < 0 or i+a >= self.height or j+b < 0 or j+b >= self.width:
+		        continue
+		    if self.flipped[i+a][j+b] and self.grid[i+a][j+b]-1 != 0:
+		        return False
+	
+	return self.valid
+
 
 class minesweeper():
     def __init__(self, w, h, numMines):
@@ -182,7 +243,6 @@ class minesweeper():
 		    continue
 		if not self.flipped[x+a][y+b] and unflippedNeighborCount != flagCount:
 		    self.beliefs[x+a][y+b] *= 1.0 - ((self.grid[x][y] - flagCount) / (float(unflippedNeighborCount) - flagCount))
-		    print self.grid[x][y], (x+a, y+b), flagCount
 		    if not self.flags[x+a][y+b] and self.beliefs[x+a][y+b] > 0:
 		        self.antibeliefs[x+a][y+b] *= ((self.grid[x][y] - flagCount) / (float(unflippedNeighborCount) - flagCount))
 
@@ -202,7 +262,117 @@ class minesweeper():
 
 	return newFlagCount > allFlagCount
 
+    def sampleEvidenceGivenMineAtPos(self, pos, withNeighbors, numMines):
+	if len(withNeighbors) == 0:
+	    return True
+        if self.flipped[pos[0]][pos[1]] or numMines+1 > len(withNeighbors):
+	    return False
+        mines = [[False for j in range(self.width)] for i in range(self.height)]
+	mines[pos[0]][pos[1]] = True
+	random.shuffle(withNeighbors)
+	for i in range(numMines-1):
+	    mines[withNeighbors[i][0]][withNeighbors[i][1]] = True
+	if mines[pos[0]][pos[1]] == True:
+	    mines[withNeighbors[numMines-1][0]][withNeighbors[numMines-1][1]] = True
+	mines[pos[0]][pos[1]] = True
+	
+	copyGrid = copy.deepcopy(self.grid)
+	copyGridSum = 0
+
+	for i in range(self.height):
+	    for j in range(self.width):
+	        if self.flipped[i][j]:
+		    copyGridSum += copyGrid[i][j]
+	        if mines[i][j]:
+	            if self.flipped[i][j]:
+	                return False
+			#continue
+	            for a in range(-1, 2):
+	                for b in range(-1, 2):
+		            if i+a < 0 or i+a >= self.height or j+b < 0 or j+b >= self.width:
+		                continue
+                            if self.flipped[i+a][j+b]:
+		                copyGrid[i+a][j+b] -= 1
+		    	        #if copyGrid[i+a][j+b] < 0:
+			        #    return False
+
+        sampleSum = 0
+        for i in range(self.height):
+	    for j in range(self.width):
+	        if self.flipped[i][j] and copyGrid[i][j] != 0:
+		    return False
+		    sampleSum += pow(copyGrid[i][j], 2)
+		    copyGridSum += pow(8, 2)
+        ret = 1 - (float(sampleSum)/max(copyGridSum, 1))
+	return True
+
+    def getListOfUnflippedTilesWithFlippedNeighbors(self):
+        ret = []
+	for i in range(self.height):
+	    for j in range(self.width):
+	        if self.flipped[i][j]:
+		    continue
+		for a in range(-1, 2):
+		    for b in range(-1, 2):
+		        if i+a < 0 or i+a >= self.height or j+b < 0 or j+b >= self.height:
+			    continue
+		        if self.flipped[i+a][j+b] and (i, j) not in ret:
+			    ret.append((i, j))
+
+	return ret 
+
+    def sampleFromListOfProbs(self, probs):
+        rand = random.random()
+	runningTot = 0
+	idx = 0
+
+	while(runningTot < rand):
+	    runningTot += probs[idx]
+	    idx += 1
+	
+	return idx-1
+
+    def getDistrOfPossibleMineCountsInNeighborRegion(self, withNeighbors):
+        distr = [0 for i in range(self.numMines+1)]
+	numSamples = 1000
+	#iterate over all possible number of mines within evidence range
+	for x in range(min(self.numMines+1, len(withNeighbors)+1)):
+	    #take numSamples samples
+	    for y in range(numSamples):
+	        random.shuffle(withNeighbors)
+                mines = [[False for j in range(self.width)] for i in range(self.height)]
+		#randomly scatter x mines on grid within evidence range
+	        for z in range(x):
+		    mines[withNeighbors[z][0]][withNeighbors[z][1]] = True
+
+                copyGrid = copy.deepcopy(self.grid)
+
+		for i in range(self.height):
+		    for j in range(self.width):
+		        if mines[i][j]:
+			    for a in range(-1, 2):
+			        for b in range(-1, 2):
+				    if i+a < 0 or i+a >= self.height or j+b < 0 or j+b >= self.width:
+				        continue
+				    if self.flipped[i+a][j+b]:
+				        copyGrid[i+a][j+b] -= 1
+
+		agreedWithEvidence = True
+		for i in range(self.height):
+		    for j in range(self.width):
+		        if self.flipped[i][j] and copyGrid[i][j] != 0:
+			    agreedWithEvidence = False
+
+	        distr[x] += agreedWithEvidence
+
+        sumElems = sum(distr)
+	for i in range(len(distr)):
+	    distr[i] /= float(max(sumElems, 1))
+
+	return distr
+
     def updateBeliefs(self):
+        '''
 	self.beliefs = [[1 - float(self.numMines)/(self.width*self.height) for i in range(self.width)] for j in range(self.height)]
 	self.antibeliefs = [[float(self.numMines)/(self.width*self.height) for i in range(self.width)] for j in range(self.height)]
 	newFlags = True
@@ -216,7 +386,40 @@ class minesweeper():
 		        if self.grid[i][j] > 0:
 		            newFlags = newFlags or self.actOnNeighbors(i, j)
 			    if newFlags:
-			        print newFlags
+			        print newFlags'''
+
+        '''
+	withNeighbors = self.getListOfUnflippedTilesWithFlippedNeighbors()
+	distrList = self.getDistrOfPossibleMineCountsInNeighborRegion(withNeighbors)
+	print distrList
+	print self.sampleFromListOfProbs(distrList)
+        flippedTiles = self.height * self.width - self.unflippedTiles()
+
+	for i in range(self.height):
+	    for j in range(self.width):
+	        sampleCount = 0
+		posSampleCount = 0
+		numSamples = max(ncr(len(withNeighbors), self.sampleFromListOfProbs(distrList)) * 100, 10)
+	        for a in range(numSamples):
+		    sampleCount += 1
+	            numMines = self.sampleFromListOfProbs(distrList)
+		    posSampleCount += float(self.sampleEvidenceGivenMineAtPos((i, j), withNeighbors, numMines))
+		if (i, j) in withNeighbors:
+		    posSampleCount *= (1-float(ncr(len(withNeighbors), numMines)) / ncr(self.height * self.width, numMines))
+		else:
+		    posSampleCount *= (1-float(ncr(self.height * self.width - len(withNeighbors), numMines)) / ncr(self.height * self.width, numMines))
+		print float(ncr(len(withNeighbors), numMines)) / ncr(self.height * self.width, numMines)
+		self.beliefs[i][j] = float(posSampleCount)/(sampleCount)
+		print self.beliefs[i][j]'''
+
+        numSamples = 10000
+	for a in range(numSamples):
+	    sampler = Sampler(self.grid, self.flipped, self.numMines)
+	    for i in range(self.height):
+	        for j in range(self.width):
+		    self.beliefs[i][j] += sampler.sample((i, j))
+
+	
 
     def normalizeBeliefs(self):
         sumBeliefs = 0
@@ -224,11 +427,13 @@ class minesweeper():
 	unflippedTiles = self.unflippedTiles()
 
         maxBeliefs = 0
+	minBeliefs = 999999
 	maxAntiBeliefs = 0
         for i in range(self.height):
 	    for j in range(self.width):
 	        if not self.flipped[i][j]:
 	            maxBeliefs = max(maxBeliefs, self.beliefs[i][j])
+		    minBeliefs = min(minBeliefs, self.beliefs[i][j])
 		    sumBeliefs += self.beliefs[i][j]
 		    if not self.flags[i][j]:
 		        sumAntiBeliefs += self.antibeliefs[i][j]
@@ -239,18 +444,19 @@ class minesweeper():
 	        #self.beliefs[i][j] *= (unflippedTiles - self.numMines) / sumBeliefs
 		if not self.flipped[i][j]:
 		    if sumBeliefs > 0:
-		        self.beliefs[i][j] /= maxBeliefs
+		        self.beliefs[i][j] = (self.beliefs[i][j] - minBeliefs) /  max((maxBeliefs - minBeliefs), 1)
 		    if sumAntiBeliefs > 0:
 		        self.antibeliefs[i][j] /= maxAntiBeliefs
 
+
     def actOnBeliefs(self):
-        maxval = 0
+        maxval = 9999999
 	argmax = (0, 0)
 
 	for i in range(self.height):
 	    for j in range(self.width):
-	        belief = 1.0 - self.antibeliefs[i][j]
-	        if belief >= maxval and not self.flags[i][j] and not self.flipped[i][j]:
+	        belief = self.beliefs[i][j]
+	        if belief <= maxval and not self.flipped[i][j]:
 		    maxval = belief
 		    argmax = (i, j)
 
@@ -268,8 +474,11 @@ class minesweeper():
         sumBeliefs = sum(sum(self.beliefs, []))
         return sumBeliefs == 0 or self.loss()
 
-def main():  
-    ms = minesweeper(8, 8, 10)
+def main(): 
+    w = 8
+    h = 8
+    n = 10
+    ms = minesweeper(w, h, n)
     gui = minesweeperGui(800, 800, ms)
     while True:
     #ms.grid = [[-2, 0, -2], [1, 2, 1], [0,0,0]]
@@ -283,7 +492,7 @@ def main():
 	        break
             ms.updateBeliefs()
 	    ms.normalizeBeliefs()
-	    time.sleep(3)
+	    time.sleep(0)
 
         gui.draw(ms)
 
@@ -294,7 +503,7 @@ def main():
 
 	raw_input("Press enter to continue")
 
-        ms = minesweeper(8, 8, 10)
+        ms = minesweeper(w, h, n)
 
 if __name__ == "__main__": main()
     
